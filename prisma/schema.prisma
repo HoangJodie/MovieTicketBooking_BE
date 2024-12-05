@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model booking {
+  booking_id     Int             @id @default(autoincrement())
+  user_id        Int?
+  showtime_id    Int?
+  booking_date   DateTime?       @default(now()) @db.DateTime(0)
+  total_amount   Decimal?        @db.Decimal(10, 2)
+  booking_status String?         @default("pending") @db.VarChar(50)
+  payment_status String?         @default("pending") @db.VarChar(50)
+  booking_code   String?         @unique(map: "booking_code") @db.VarChar(50)
+  user           user?           @relation(fields: [user_id], references: [user_id], onDelete: NoAction, onUpdate: NoAction, map: "booking_ibfk_1")
+  showtime       showtime?       @relation(fields: [showtime_id], references: [showtime_id], onDelete: NoAction, onUpdate: NoAction, map: "booking_ibfk_2")
+  bookingdetail  bookingdetail[]
+  payment        payment[]
+
+  @@index([booking_code], map: "idx_booking_code")
+  @@index([showtime_id], map: "showtime_id")
+  @@index([user_id], map: "user_id")
+}
+
+model bookingdetail {
+  detail_id   Int      @id @default(autoincrement())
+  booking_id  Int?
+  seat_id     Int?
+  price       Decimal? @db.Decimal(10, 2)
+  ticket_code String?  @unique(map: "ticket_code") @db.VarChar(50)
+  booking     booking? @relation(fields: [booking_id], references: [booking_id], onDelete: NoAction, onUpdate: NoAction, map: "bookingdetail_ibfk_1")
+  seat        seat?    @relation(fields: [seat_id], references: [seat_id], onDelete: NoAction, onUpdate: NoAction, map: "bookingdetail_ibfk_2")
+
+  @@index([booking_id], map: "booking_id")
+  @@index([ticket_code], map: "idx_ticket_code")
+  @@index([seat_id], map: "seat_id")
+}
+
+model genre {
+  genre_id    Int          @id @default(autoincrement())
+  name        String       @db.VarChar(100)
+  description String?      @db.Text
+  moviegenre  moviegenre[]
+}
+
+model movie {
+  movie_id     Int          @id @default(autoincrement())
+  title        String       @db.VarChar(255)
+  description  String?      @db.Text
+  duration     Int?
+  release_date DateTime?    @db.Date
+  end_date     DateTime?    @db.Date
+  poster_url   String?      @db.VarChar(255)
+  trailer_url  String?      @db.VarChar(255)
+  director     String?      @db.VarChar(255)
+  cast         String?      @db.Text
+  language     String?      @db.VarChar(50)
+  subtitle     String?      @db.VarChar(50)
+  status       String?      @default("active") @db.VarChar(50)
+  created_at   DateTime?    @default(now()) @db.DateTime(0)
+  updated_at   DateTime?    @default(now()) @db.DateTime(0)
+  moviegenre   moviegenre[]
+  showtime     showtime[]
+
+  @@index([title], map: "idx_movie_title")
+}
+
+model moviegenre {
+  movie_id Int
+  genre_id Int
+  movie    movie @relation(fields: [movie_id], references: [movie_id], onDelete: NoAction, onUpdate: NoAction, map: "moviegenre_ibfk_1")
+  genre    genre @relation(fields: [genre_id], references: [genre_id], onDelete: NoAction, onUpdate: NoAction, map: "moviegenre_ibfk_2")
+
+  @@id([movie_id, genre_id])
+  @@index([genre_id], map: "genre_id")
+}
+
+model payment {
+  payment_id     Int       @id @default(autoincrement())
+  booking_id     Int?
+  amount         Decimal?  @db.Decimal(10, 2)
+  payment_method String?   @db.VarChar(50)
+  payment_date   DateTime? @default(now()) @db.DateTime(0)
+  transaction_id String?   @db.VarChar(255)
+  status         String?   @default("pending") @db.VarChar(50)
+  booking        booking?  @relation(fields: [booking_id], references: [booking_id], onDelete: NoAction, onUpdate: NoAction, map: "payment_ibfk_1")
+
+  @@index([booking_id], map: "booking_id")
+}
+
+model room {
+  room_id  Int        @id @default(autoincrement())
+  name     String     @db.VarChar(100)
+  capacity Int
+  status   String?    @default("active") @db.VarChar(50)
+  seat     seat[]
+  showtime showtime[]
+}
+
+model seat {
+  seat_id       Int             @id @default(autoincrement())
+  room_id       Int
+  row           String?         @db.VarChar(10)
+  seat_number   Int?
+  seat_type     String?         @db.VarChar(50)
+  price         Decimal?        @db.Decimal(10, 2)
+  status        String?         @default("active") @db.VarChar(50)
+  bookingdetail bookingdetail[]
+  room          room            @relation(fields: [room_id], references: [room_id], onDelete: NoAction, onUpdate: NoAction, map: "seat_ibfk_1")
+
+  @@index([room_id], map: "room_id")
+}
+
+model showtime {
+  showtime_id     Int       @id @default(autoincrement())
+  movie_id        Int?
+  room_id         Int
+  show_date       DateTime? @db.DateTime(0)
+  start_time      DateTime? @db.Time(0)
+  end_time        DateTime? @db.Time(0)
+  base_price      Decimal?  @db.Decimal(10, 2)
+  available_seats Int?
+  status          String?   @default("active") @db.VarChar(50)
+  booking         booking[]
+  movie           movie?    @relation(fields: [movie_id], references: [movie_id], onDelete: NoAction, onUpdate: NoAction, map: "showtime_ibfk_1")
+  room            room      @relation(fields: [room_id], references: [room_id], onDelete: NoAction, onUpdate: NoAction, map: "showtime_ibfk_2")
+
+  @@index([show_date], map: "idx_showtime_date")
+  @@index([movie_id], map: "movie_id")
+  @@index([room_id], map: "room_id")
+}
+
+model user {
+  user_id        Int       @id @default(autoincrement())
+  email          String    @unique(map: "email") @db.VarChar(255)
+  password       String    @db.VarChar(255)
+  full_name      String?   @db.VarChar(255)
+  phone_number   String?   @db.VarChar(20)
+  role_id        Int?
+  email_verified Boolean?  @default(false)
+  created_at     DateTime? @default(now()) @db.DateTime(0)
+  updated_at     DateTime? @default(now()) @db.DateTime(0)
+  status         String?   @default("active") @db.VarChar(50)
+  booking        booking[]
+
+  @@index([email], map: "idx_user_email")
+}
