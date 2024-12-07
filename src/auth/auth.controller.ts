@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Get, Req, Res } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Get, Req, Res, Param, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LocalGuard } from './guards/local.guard';
 import { JwtAuthGuard } from './guards/jwt.guard';
@@ -16,41 +16,25 @@ export class AuthController {
 
 @Post('login')
 @UseGuards(LocalGuard)
-async login(@Req() req: Request, @Res() res: Response) {
+async login(@Req() req: Request) {
   try {
     const user = req.user;
-    const { accessToken, refreshToken } = this.authService.generateTokens(user);
-
-    // Lưu refresh token vào cookies
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    return res.json({ accessToken });
+    const tokens = await this.authService.generateTokens(user);
+    return tokens; // Trả về cả access token và refresh token
   } catch (error) {
-    console.error('Login error:', error.message);
-    return res.status(500).json({ message: 'Login failed due to server error' });
+    throw new UnauthorizedException('Login failed');
   }
 }
 
 
   // Endpoint để lấy access token mới từ refresh token
   @Post('refresh')
-  async refreshToken(@Req() req: Request, @Res() res: Response) {
-    const refreshToken = req.cookies['refreshToken']; // Lấy refresh token từ cookies
-
-    if (!refreshToken) {
-      return res.status(403).json({ message: 'Refresh token missing' });
-    }
-
+  async refreshToken(@Body('refreshToken') refreshToken: string) {
     try {
       const newAccessToken = await this.authService.refreshToken(refreshToken);
-      return res.json({ accessToken: newAccessToken });
+      return { accessToken: newAccessToken };
     } catch (error) {
-      return res.status(401).json({ message: 'Invalid refresh token' });
+      throw new UnauthorizedException('Invalid refresh token');
     }
   }
   // Lấy thông tin trạng thái người dùng (yêu cầu JWT token)
@@ -61,13 +45,11 @@ async login(@Req() req: Request, @Res() res: Response) {
   }
 
   @Post('logout')
-  async logout(@Res() res: Response) {
-    res.clearCookie('refreshToken', {
-      httpOnly: true,
-      secure: true, // Đảm bảo dùng HTTPS trong môi trường production
-      sameSite: 'strict',
-    }); // Xóa cookie refresh token
-    return res.json({ message: 'Logged out successfully' });
+  @UseGuards(JwtAuthGuard)
+  async logout(@Req() req: Request) {
+    const userId = req.user['user_id'];
+    await this.authService.logout(userId);
+    return { message: 'Logged out successfully' };
   }
 
   // Chỉ admin có thể truy cập trang dashboard
@@ -76,5 +58,13 @@ async login(@Req() req: Request, @Res() res: Response) {
   @Roles('1') // Chỉ những người có role_id '1' mới truy cập được
   getAdminDashboard(@Req() req: Request) {
     return `Welcome to admin dashboard`; // Trả về thông điệp chào mừng
+  }
+
+  @Get('check-token/:userId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('1') // Chỉ admin mới được kiểm tra
+  async checkStoredToken(@Param('userId') userId: string) {
+    const token = await this.authService.getStoredRefreshToken(userId);
+    return { stored_token: token };
   }
 }

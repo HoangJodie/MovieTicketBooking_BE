@@ -11,28 +11,62 @@ import {
   HttpStatus,
   NotFoundException,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  Query,
+  DefaultValuePipe,
 } from '@nestjs/common';
 import { MovieService } from './movie.service';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guards';
 import { Roles } from '../auth/decorators/roles.decorators';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { GenreService } from './genre.service';
 
 @Controller('api/v1/movies')
 export class MovieController {
-  constructor(private readonly movieService: MovieService) {}
+  constructor(
+    private readonly movieService: MovieService,
+    private readonly genreService: GenreService,
+  ) {}
 
   @Get()
-  async getAllMovies() {
+  async getAllMovies(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('search') search?: string,
+  ) {
     try {
-      const movies = await this.movieService.findAll();
-      return { status: 'success', data: movies };
+      const result = await this.movieService.findAll({
+        page,
+        limit,
+        search,
+      });
+
+      return {
+        status: 'success',
+        data: result.data,
+        meta: {
+          total: result.total,
+          page: page,
+          last_page: Math.ceil(result.total / limit),
+          limit: limit,
+        },
+      };
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw new HttpException(
-          { status: 'error', message: error.message },
-          HttpStatus.NOT_FOUND,
-        );
-      }
+      throw new HttpException(
+        { status: 'error', message: error.message },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('genres')
+  async getAllGenres() {
+    try {
+      const genres = await this.genreService.getAllGenres();
+      return { status: 'success', data: genres };
+    } catch (error) {
       throw new HttpException(
         { status: 'error', message: error.message },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -60,11 +94,15 @@ export class MovieController {
   }
 
   @Post()
-  //   @UseGuards(JwtAuthGuard, RolesGuard)
-  //   @Roles('1')
-  async createMovie(@Body() movieData: any) {
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('1')
+  @UseInterceptors(FileInterceptor('poster'))
+  async createMovie(
+    @Body() movieData: any,
+    @UploadedFile() poster: Express.Multer.File,
+  ) {
     try {
-      const movie = await this.movieService.create(movieData);
+      const movie = await this.movieService.create(movieData, poster);
       return { status: 'success', data: movie };
     } catch (error) {
       throw new HttpException(
@@ -106,4 +144,6 @@ export class MovieController {
       );
     }
   }
+
+  
 }

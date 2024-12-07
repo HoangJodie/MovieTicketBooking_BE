@@ -8,10 +8,12 @@ import { LocalStrategy } from './strategies/local.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { RolesGuard } from './guards/roles.guards';
 import { DatabaseModule } from './database/database.module';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
   imports: [
     DatabaseModule,
+    RedisModule,
     PassportModule,
     JwtModule.register({
       secret: 'rhehebeheh34635y',

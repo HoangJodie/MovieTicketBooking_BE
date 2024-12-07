@@ -8,15 +8,22 @@ export class RolesGuard implements CanActivate {
     canActivate(context: ExecutionContext): boolean {
         const roles = this.reflector.get<string[]>('roles', context.getHandler());
         if (!roles) {
-            return true; // Nếu không có yêu cầu roles cụ thể, cho phép truy cập
+            return true;
         }
 
         const request = context.switchToHttp().getRequest();
-        const user = (request as any).user; // Ép kiểu `request` để bỏ qua kiểm tra kiểu của TypeScript
+        const user = request.user;
 
-        console.log('User:', user); // Log thông tin người dùng
-        console.log('Required Roles:', roles); // Log các role yêu cầu
+        console.log('User from request:', user);
 
-        return roles.includes(user?.role?.toString()); // Sử dụng user.role thay vì user.role_id
+        if (!user || !user.role_id) {
+            console.log('Missing user or role_id in token payload');
+            return false;
+        }
+
+        console.log('Required Roles:', roles);
+        console.log('User Role:', user.role_id);
+
+        return roles.includes(user.role_id.toString());
     }
 }

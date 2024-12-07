@@ -1,6 +1,6 @@
-import { PassportStrategy } from "@nestjs/passport";
-import { ExtractJwt, Strategy } from "passport-jwt";
-import { Injectable } from "@nestjs/common";
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { PassportStrategy } from '@nestjs/passport';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -12,12 +12,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  validate(payload: any) {
+  async validate(payload: any) {
     return {
       user_id: payload.user_id,
-      username: payload.username, // Bao gồm username
-      role: payload.role,
+      email: payload.email,
+      role_id: payload.role_id
     };
-  }  
+  }
 }
 

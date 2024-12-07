@@ -1,42 +1,73 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../auth/database/database.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
+
+interface FindAllParams {
+  page: number;
+  limit: number;
+  search?: string;
+}
 
 @Injectable()
 export class MovieService {
-  constructor(private readonly prisma: DatabaseService) {}
+  constructor(
+    private readonly prisma: DatabaseService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
-  async findAll() {
+  async findAll({ page, limit, search }: FindAllParams) {
     try {
+      const skip = (page - 1) * limit;
+
+      // Tạo điều kiện tìm kiếm
+      const where = {
+        status: 'active',
+        ...(search && {
+          OR: [
+            { title: { contains: search } },
+            { description: { contains: search } },
+            { director: { contains: search } },
+            { cast: { contains: search } },
+          ],
+        }),
+      };
+
+      // Đếm tổng số phim thỏa điều kiện
+      const total = await this.prisma.movie.count({ where });
+
+      // Lấy danh sách phim có phân trang
       const movies = await this.prisma.movie.findMany({
-        where: { status: 'active' },
+        where,
         include: {
           moviegenre: {
             include: { genre: true },
           },
         },
         orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
       });
 
-      if (!movies.length) {
-        throw new NotFoundException('Không có phim nào trong hệ thống');
-      }
-
-      return movies.map((movie) => ({
+      // Format dữ liệu trả về
+      const formattedMovies = movies.map((movie) => ({
         id: movie.movie_id,
         title: movie.title,
         description: movie.description,
         duration: movie.duration,
         releaseDate: movie.release_date,
         poster: movie.poster_url,
-        trailer: movie.trailer_url,
         director: movie.director,
         cast: movie.cast,
         language: movie.language,
         subtitle: movie.subtitle,
         genres: movie.moviegenre.map((mg) => mg.genre.name),
       }));
+
+      return {
+        data: formattedMovies,
+        total,
+      };
     } catch (error) {
-      if (error instanceof NotFoundException) throw error;
       throw new Error('Lỗi khi lấy danh sách phim');
     }
   }
@@ -93,48 +124,55 @@ export class MovieService {
     }
   }
 
-  async create(movieData: any) {
+  async create(movieData: any, poster?: Express.Multer.File) {
     try {
       // Kiểm tra dữ liệu đầu vào
       if (
         !movieData.title ||
         !movieData.duration ||
         !movieData.releaseDate ||
-        !movieData.genreIds?.length
+        !movieData.genreIds
       ) {
         throw new Error(
           'Thiếu thông tin bắt buộc: title, duration, releaseDate, genreIds',
         );
       }
 
-      // Kiểm tra genres có tồn tại
-      const genres = await this.prisma.genre.findMany({
-        where: {
-          genre_id: {
-            in: movieData.genreIds,
-          },
-        },
-      });
+      // Chuyển genreIds từ string sang array
+      let genreIds;
+      try {
+        genreIds = typeof movieData.genreIds === 'string' 
+          ? JSON.parse(movieData.genreIds)
+          : movieData.genreIds;
+      } catch (error) {
+        throw new Error('genreIds không đúng định dạng. Phải là array hoặc JSON string của array');
+      }
 
-      if (genres.length !== movieData.genreIds.length) {
-        throw new Error('Một số genre không tồn tại trong hệ thống');
+      if (!Array.isArray(genreIds)) {
+        throw new Error('genreIds phải là một mảng các ID');
+      }
+
+      // Upload poster lên Cloudinary nếu có
+      let posterUrl = null;
+      if (poster) {
+        const uploadResult = await this.cloudinaryService.uploadImage(poster);
+        posterUrl = uploadResult.secure_url;
       }
 
       const movie = await this.prisma.movie.create({
         data: {
           title: movieData.title,
           description: movieData.description,
-          duration: movieData.duration,
+          duration: parseInt(movieData.duration),
           release_date: new Date(movieData.releaseDate),
-          poster_url: movieData.poster,
-          trailer_url: movieData.trailer,
+          poster_url: posterUrl,
           director: movieData.director,
           cast: movieData.cast,
           language: movieData.language,
           subtitle: movieData.subtitle,
           moviegenre: {
-            create: movieData.genreIds.map((genreId: number) => ({
-              genre: { connect: { genre_id: genreId } },
+            create: genreIds.map((genreId: number) => ({
+              genre: { connect: { genre_id: Number(genreId) } },
             })),
           },
         },
@@ -147,7 +185,6 @@ export class MovieService {
         },
       });
 
-      // Format lại dữ liệu trả về
       return {
         id: movie.movie_id,
         title: movie.title,
@@ -155,7 +192,6 @@ export class MovieService {
         duration: movie.duration,
         releaseDate: movie.release_date,
         poster: movie.poster_url,
-        trailer: movie.trailer_url,
         director: movie.director,
         cast: movie.cast,
         language: movie.language,
@@ -183,7 +219,6 @@ export class MovieService {
           duration: movieData.duration,
           release_date: new Date(movieData.releaseDate),
           poster_url: movieData.poster,
-          trailer_url: movieData.trailer,
           director: movieData.director,
           cast: movieData.cast,
           language: movieData.language,
