@@ -28,14 +28,18 @@ export class ShowtimeService {
 
       // Chuyển đổi thời gian
       const showDate = new Date(createShowtimeDto.show_date);
+      showDate.setHours(0, 0, 0, 0); // Reset giờ về 00:00:00
+
+      // Parse thời gian từ input
       const [startHour, startMinute] = createShowtimeDto.start_time.split(':');
       const [endHour, endMinute] = createShowtimeDto.end_time.split(':');
 
+      // Tạo đối tượng Date cho start_time và end_time
       const startTime = new Date(showDate);
-      startTime.setHours(parseInt(startHour), parseInt(startMinute));
+      startTime.setUTCHours(parseInt(startHour), parseInt(startMinute));
 
       const endTime = new Date(showDate);
-      endTime.setHours(parseInt(endHour), parseInt(endMinute));
+      endTime.setUTCHours(parseInt(endHour), parseInt(endMinute));
 
       // Kiểm tra xung đột lịch chiếu
       const conflictShowtime = await this.prisma.showtime.findFirst({
@@ -74,7 +78,7 @@ export class ShowtimeService {
           start_time: startTime,
           end_time: endTime,
           base_price: createShowtimeDto.base_price,
-          available_seats: room.capacity, // Số ghế trống ban đầu bằng sức chứa phòng
+          available_seats: room.capacity,
           status: 'active',
         },
         include: {
@@ -83,6 +87,7 @@ export class ShowtimeService {
         },
       });
 
+      // Format response
       return {
         id: showtime.showtime_id,
         movie: {
@@ -94,13 +99,75 @@ export class ShowtimeService {
           name: showtime.room.name,
         },
         showDate: showtime.show_date,
-        startTime: showtime.start_time,
-        endTime: showtime.end_time,
+        startTime: createShowtimeDto.start_time,  // Trả về thời gian gốc từ input
+        endTime: createShowtimeDto.end_time,      // Trả về thời gian gốc từ input
         basePrice: showtime.base_price,
         availableSeats: showtime.available_seats,
       };
     } catch (error) {
       throw new BadRequestException(error.message);
+    }
+  }
+
+  async findByMovie(movieId: number, date?: string) {
+    try {
+      const where: any = {
+        movie_id: movieId,
+        status: 'active',
+      };
+
+      if (date) {
+        const searchDate = new Date(date);
+        searchDate.setHours(0, 0, 0, 0);
+        where.show_date = searchDate;
+      }
+
+      const showtimes = await this.prisma.showtime.findMany({
+        where,
+        select: {
+          showtime_id: true,
+          show_date: true,
+          start_time: true,
+          end_time: true,
+          base_price: true,
+          available_seats: true,
+          movie: {
+            select: {
+              movie_id: true,
+              title: true,
+            },
+          },
+          room: {
+            select: {
+              room_id: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: [
+          { show_date: 'asc' },
+          { start_time: 'asc' },
+        ],
+      });
+
+      return showtimes.map(showtime => ({
+        id: showtime.showtime_id,
+        movie: {
+          id: showtime.movie.movie_id,
+          title: showtime.movie.title,
+        },
+        room: {
+          id: showtime.room.room_id,
+          name: showtime.room.name,
+        },
+        showDate: showtime.show_date,
+        startTime: showtime.start_time.toISOString().slice(11, 16),  // Lấy HH:mm từ ISO string
+        endTime: showtime.end_time.toISOString().slice(11, 16),      // Lấy HH:mm từ ISO string
+        basePrice: showtime.base_price,
+        availableSeats: showtime.available_seats,
+      }));
+    } catch (error) {
+      throw new Error('Lỗi khi lấy danh sách lịch chiếu');
     }
   }
 } 

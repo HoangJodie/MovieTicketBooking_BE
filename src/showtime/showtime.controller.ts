@@ -7,6 +7,8 @@ import {
   ParseIntPipe,
   HttpException,
   HttpStatus,
+  Get,
+  Query
 } from '@nestjs/common';
 import { ShowtimeService } from './showtime.service';
 import { CreateShowtimeDto } from './dto/create-showtime.dto';
@@ -31,6 +33,28 @@ export class ShowtimeController {
       return {
         status: 'success',
         data: showtime,
+      };
+    } catch (error) {
+      throw new HttpException(
+        {
+          status: 'error',
+          message: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Get('movies/:movieId')
+  async getShowtimesByMovie(
+    @Param('movieId', ParseIntPipe) movieId: number,
+    @Query('date') date?: string,
+  ) {
+    try {
+      const showtimes = await this.showtimeService.findByMovie(movieId, date);
+      return {
+        status: 'success',
+        data: showtimes,
       };
     } catch (error) {
       throw new HttpException(
