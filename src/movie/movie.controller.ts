@@ -22,6 +22,7 @@ import { RolesGuard } from '../auth/guards/roles.guards';
 import { Roles } from '../auth/decorators/roles.decorators';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { GenreService } from './genre.service';
+import { CreateShowtimeDto } from './dto/create-showtime.dto';
 
 @Controller('api/v1/movies')
 export class MovieController {
@@ -144,6 +145,4 @@ export class MovieController {
       );
     }
   }
-
-  
 }
