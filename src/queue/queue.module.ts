@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bull';
 import { SeatReservationProcessor } from './seat-reservation.processor';
 import { SeatReservationService } from './seat-reservation.service';
 import { DatabaseModule } from '../auth/database/database.module';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { DatabaseModule } from '../auth/database/database.module';
       name: 'seat-reservation',
     }),
     DatabaseModule,
+    RedisModule,
   ],
   providers: [SeatReservationProcessor, SeatReservationService],
   exports: [SeatReservationService],
