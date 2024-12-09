@@ -7,7 +7,7 @@ async function bootstrap() {
 
   app.enableCors({
     origin: 'http://localhost:5173', // URL của React app
-    credentials: true,
+    credentials: true,  // Cho phép gửi credentials
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });

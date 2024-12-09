@@ -8,6 +8,7 @@ import { UserModule } from './user/user.module';
 import { ShowtimeModule } from './showtime/showtime.module';
 import { RoomModule } from './room/room.module';
 import { BookingModule } from './booking/booking.module';
+import { PaymentModule } from './payment/payment.module';
 
 @Module({
   imports: [
@@ -17,7 +18,8 @@ import { BookingModule } from './booking/booking.module';
     UserModule,
     ShowtimeModule,
     RoomModule,
-    BookingModule
+    BookingModule,
+    PaymentModule
   ],
   controllers: [AppController],
   providers: [AppService],
