@@ -7,6 +7,8 @@ import { ZaloPayConfig } from "../config/zalo-pay.config";
 import * as crypto from 'crypto';
 import { Decimal } from '@prisma/client/runtime/library';
 import * as qs from 'qs';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 
 interface ZaloPayRequest {
   app_id: string;
@@ -30,7 +32,10 @@ interface ZaloPayQueryRequest {
 
 @Injectable()
 export class ZaloPayService {
-  constructor(private readonly prisma: DatabaseService) {}
+  constructor(
+    private readonly prisma: DatabaseService,
+    @InjectQueue('seat-reservation') private reservationQueue: Queue,
+  ) {}
 
   private generateMac(data: string, key: string): string {
     return crypto
@@ -185,6 +190,14 @@ export class ZaloPayService {
         }
       }
     });
+
+    // Xóa job release seats nếu có
+    const jobs = await this.reservationQueue.getJobs(['delayed']);
+    for (const job of jobs) {
+      if (job.data.bookingId === bookingId) {
+        await job.remove();
+      }
+    }
 
     await this.prisma.$transaction([
       // Cập nhật payment

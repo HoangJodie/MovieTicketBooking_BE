@@ -89,4 +89,15 @@ export class BookingController {
       data: await this.seatReservationService.getSeatsForShowtime(showtimeId, userId),
     };
   }
+
+  @Get('my-tickets')
+  @UseGuards(JwtAuthGuard)
+  async getMyTickets(@Req() req) {
+    try {
+      const userId = req.user.user_id;
+      return await this.seatReservationService.getTicketsByUser(userId);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
 } 

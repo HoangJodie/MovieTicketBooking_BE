@@ -15,6 +15,10 @@ import { RedisModule } from '../redis/redis.module';
     }),
     BullModule.registerQueue({
       name: 'seat-reservation',
+      defaultJobOptions: {
+        removeOnComplete: true,
+        attempts: 3
+      }
     }),
     DatabaseModule,
     RedisModule,

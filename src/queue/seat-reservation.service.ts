@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { DatabaseService } from 'src/database/database.service';
@@ -8,6 +8,7 @@ import { ConfirmBookingDto } from '../booking/dto/confirm-booking.dto';
 @Injectable()
 export class SeatReservationService {
   private temporarySelections: Map<string, { seatIds: number[], timestamp: number }> = new Map();
+  private readonly logger = new Logger(SeatReservationService.name);
 
   constructor(
     @InjectQueue('seat-reservation') private reservationQueue: Queue,
@@ -106,11 +107,11 @@ export class SeatReservationService {
       // Lưu thông tin quyền sở hữu ghế vào Redis
       for (const seatId of seatIds) {
         const key = `seat:${showtimeId}:${seatId}`;
-        await this.redis.set(key, userId.toString(), 600); // Hết hạn sau 10 phút
+        await this.redis.set(key, userId.toString(), 60); // Sửa lại thành 600 giây (10 phút)
       }
 
-      // Thêm job release ghế vào queue
-      await this.reservationQueue.add(
+      // Thêm job release ghế vào queue với logging
+      const job = await this.reservationQueue.add(
         'release-seats',
         {
           bookingId: booking.booking_id,
@@ -118,12 +119,32 @@ export class SeatReservationService {
           showtimeId,
         },
         {
-          delay: 10 * 60 * 1000, // 10 phút
+          delay: 6 * 10000, // 6 giây
         }
       );
 
+      this.logger.log(`Created release job ${job.id} for booking ${booking.booking_id}`);
+      this.logger.log(`Seats will be released in 6 seconds at ${new Date(Date.now() + 6 * 1000)}`);
+
+      // Thêm listener để log quá trình đếm ngược mỗi giây
+      const remainingTime = setInterval(async () => {
+        const currentJob = await this.reservationQueue.getJob(job.id);
+        if (currentJob) {
+          const timeLeft = Math.ceil((currentJob.opts.delay - (Date.now() - currentJob.timestamp)) / 1000);
+          if (timeLeft > 0) {
+            this.logger.log(`⏰ Time remaining for booking ${booking.booking_id}: ${timeLeft} seconds`);
+          } else {
+            this.logger.log(`⚠️ Time's up for booking ${booking.booking_id}! Processing release...`);
+            clearInterval(remainingTime);
+          }
+        } else {
+          this.logger.log(`🔄 Job completed for booking ${booking.booking_id}`);
+          clearInterval(remainingTime);
+        }
+      }, 1000); // Log mỗi giây
+
       return {
-        message: 'Đặt ghế thành công, vui lòng thanh toán trong vòng 10 phút',
+        message: 'Đặt ghế thành công, vui lòng thanh toán trong vòng 6 giây',
         reservedSeats: seatIds,
         bookingId: booking.booking_id
       };
@@ -325,12 +346,26 @@ export class SeatReservationService {
         return acc;
       }, {});
 
+      // Format startTime
+      const startTime = showtime.start_time;
+      const startUtcTime = new Date(startTime).toUTCString();
+      const startHours = new Date(startUtcTime).getUTCHours().toString().padStart(2, '0');
+      const startMinutes = new Date(startUtcTime).getUTCMinutes().toString().padStart(2, '0');
+      const formattedStartTime = `${startHours}:${startMinutes}`;
+
+      // Format endTime
+      const endTime = showtime.end_time;
+      const endUtcTime = new Date(endTime).toUTCString();
+      const endHours = new Date(endUtcTime).getUTCHours().toString().padStart(2, '0');
+      const endMinutes = new Date(endUtcTime).getUTCMinutes().toString().padStart(2, '0');
+      const formattedEndTime = `${endHours}:${endMinutes}`;
+
       return {
         showtime: {
           id: showtime.showtime_id,
           movie: showtime.movie,
-          startTime: showtime.start_time.toString().slice(0, 5),
-          endTime: showtime.end_time.toString().slice(0, 5),
+          startTime: formattedStartTime,
+          endTime: formattedEndTime,
           basePrice: showtime.base_price,
         },
         room: {
@@ -377,7 +412,7 @@ export class SeatReservationService {
       // Lấy danh sách seat_ids
       const seatIds = pendingBooking.bookingdetail.map(detail => detail.seat_id);
 
-      // Cập nhật trạng thái ghế về available
+      // Cập nh���t trạng thái ghế về available
       await this.prisma.seat.updateMany({
         where: {
           seat_id: {
@@ -470,7 +505,7 @@ export class SeatReservationService {
           }
         });
 
-        // Xóa thông tin quyền sở hữu ghế khỏi Redis
+        // Xóa th��ng tin quyền sở hữu ghế khỏi Redis
         const key = `seat:${showtimeId}:${seatId}`;
         await this.redis.del(key);
 
@@ -614,7 +649,7 @@ export class SeatReservationService {
     });
 
     if (!showtime) {
-      throw new NotFoundException('Không tìm thấy suất chiếu');
+      throw new NotFoundException('Không tìm thấy suất chi���u');
     }
 
     // Tìm booking pending của user
@@ -693,5 +728,88 @@ export class SeatReservationService {
         },
       },
     };
+  }
+
+  async getTicketsByUser(userId: number) {
+    try {
+      const bookings = await this.prisma.booking.findMany({
+        where: {
+          user_id: userId,
+          booking_status: 'confirmed',
+          payment_status: 'completed'
+        },
+        include: {
+          showtime: {
+            include: {
+              movie: {
+                select: {
+                  movie_id: true,
+                  title: true,
+                  poster_url: true
+                }
+              },
+              room: {
+                select: {
+                  room_id: true,
+                  name: true
+                }
+              }
+            }
+          },
+          bookingdetail: {
+            include: {
+              seat: true
+            }
+          }
+        },
+        orderBy: {
+          booking_date: 'desc'
+        }
+      });
+
+      return {
+        status: 'success',
+        data: bookings.map(booking => {
+          // Format thời gian
+          const startTime = booking.showtime.start_time;
+          // Chuyển đổi Date object thành chuỗi thời gian UTC
+          const utcTime = new Date(startTime).toUTCString();
+          // Lấy giờ và phút từ chuỗi UTC
+          const hours = new Date(utcTime).getUTCHours().toString().padStart(2, '0');
+          const minutes = new Date(utcTime).getUTCMinutes().toString().padStart(2, '0');
+          const formattedTime = `${hours}:${minutes}`;
+
+          return {
+            booking_id: booking.booking_id,
+            booking_code: booking.booking_code,
+            booking_date: new Date(booking.booking_date).toLocaleDateString('vi-VN'),
+            total_amount: booking.total_amount,
+            movie: {
+              id: booking.showtime.movie.movie_id,
+              title: booking.showtime.movie.title,
+              poster_url: booking.showtime.movie.poster_url
+            },
+            showtime: {
+              id: booking.showtime.showtime_id,
+              show_date: new Date(booking.showtime.show_date).toLocaleDateString('vi-VN'),
+              start_time: formattedTime,
+              room: {
+                id: booking.showtime.room.room_id,
+                name: booking.showtime.room.name
+              }
+            },
+            seats: booking.bookingdetail.map(detail => ({
+              seat_id: detail.seat.seat_id,
+              row: detail.seat.row,
+              seat_number: detail.seat.seat_number,
+              price: detail.price,
+              ticket_code: detail.ticket_code
+            }))
+          };
+        })
+      };
+    } catch (error) {
+      throw new BadRequestException('Không thể lấy danh sách vé');
+    }
   }
 } 
