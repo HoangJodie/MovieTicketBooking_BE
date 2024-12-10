@@ -8,132 +8,145 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
-  UnauthorizedException
+  UnauthorizedException,
+  ParseIntPipe
 } from '@nestjs/common';
 import { ZaloPayService } from './zalopay.service';
 import { DatabaseService } from '../database/database.service';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
+import { Request } from 'express';
 
-// Thêm interface cho Request
 interface AuthenticatedRequest extends Request {
   user: {
     user_id: number;
   }
 }
 
-@Controller('payment')
+@Controller('api/v1/payments')
 export class PaymentController {
   constructor(
     private readonly paymentService: ZaloPayService,
     private readonly prisma: DatabaseService
   ) {}
 
-  // Tạo payment cho booking
-  @Post('create/:bookingId')
+  @Get('status/:bookingId')
   @UseGuards(JwtAuthGuard)
-  async createPayment(
-    @Param('bookingId') bookingId: string,
+  async checkPaymentStatus(
+    @Param('bookingId', ParseIntPipe) bookingId: number,
     @Req() req: AuthenticatedRequest
   ) {
     try {
-      // Verify user có quyền thanh toán booking này
+      console.log('Checking payment status for booking:', bookingId);
+      console.log('User:', req.user);
+
       const booking = await this.prisma.booking.findUnique({
-        where: { booking_id: Number(bookingId) }
+        where: { booking_id: bookingId },
+        include: {
+          payment: true
+        }
       });
 
-      if (!booking || booking.user_id !== req.user.user_id) {
+      console.log('Found booking:', booking);
+
+      if (!booking) {
+        throw new HttpException('Booking not found', HttpStatus.NOT_FOUND);
+      }
+
+      if (booking.user_id !== req.user.user_id) {
         throw new UnauthorizedException();
       }
 
-      // Tạo ZaloPay payment
-      const payment = await this.paymentService.createPayment(Number(bookingId));
+      return {
+        return_code: booking.payment_status === 'completed' ? 1 : 0,
+        data: {
+          booking_status: booking.booking_status,
+          payment_status: booking.payment_status,
+          amount: booking.total_amount
+        }
+      };
+    } catch (error) {
+      console.error('Error checking payment status:', error);
+      throw new HttpException(
+        error.message || 'Không thể kiểm tra trạng thái thanh toán',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+  
+  // Tạo payment cho booking
+  @Post('orders/zalopay')
+  @UseGuards(JwtAuthGuard)
+  async createPayment(
+    @Body() data: { bookingId: number },
+    @Req() req: AuthenticatedRequest
+  ) {
+    try {
+      console.log('Creating ZaloPay order for booking:', data.bookingId);
+      console.log('User:', req.user);
+
+      const booking = await this.prisma.booking.findUnique({
+        where: { booking_id: data.bookingId }
+      });
+
+      if (!booking) {
+        throw new HttpException('Booking not found', HttpStatus.NOT_FOUND);
+      }
+
+      if (booking.user_id !== req.user.user_id) {
+        throw new UnauthorizedException();
+      }
+
+      const payment = await this.paymentService.createPayment(data.bookingId);
       return payment;
 
     } catch (error) {
       console.error('Create payment error:', error);
       throw new HttpException(
         error.message || 'Không thể tạo thanh toán',
-        HttpStatus.INTERNAL_SERVER_ERROR
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
   }
 
   // Callback từ ZaloPay
   @Post('callback')
-  async handleCallback(
-    @Body() callbackData: any,
-    @Req() req: Request
-  ) {
+  async handleCallback(@Body() callbackData: any) {
     try {
-      console.log('========= CALLBACK RECEIVED =========');
-      console.log('Raw callback data:', callbackData);
-      console.log('Headers:', req.headers);
-      console.log('====================================');
+      console.log('ZaloPay callback received in controller:', callbackData);
 
-      // Verify callback signature
-      const isValid = await this.paymentService.verifyCallback(callbackData);
-      console.log('Callback signature valid:', isValid);
-
-      if (!isValid) {
-        console.log('Invalid callback signature');
-        return {
-          return_code: -1,
-          return_message: 'mac not equal'
-        };
-      }
-
-      // Parse data
       const data = JSON.parse(callbackData.data);
       const embedData = JSON.parse(data.embed_data);
-      console.log('Parsed callback data:', {data, embedData});
+      const bookingId = embedData.bookingId;
 
-      // Cập nhật trạng thái - Kiểm tra callbackData.type thay vì data.type
-      if (callbackData.type === 1) { // Success
-        console.log('Payment successful, updating status...');
-        await this.paymentService.handlePaymentSuccess(embedData.bookingId);
-      } else {
-        console.log('Payment failed, updating status...');
-        await this.paymentService.handlePaymentFailure(embedData.bookingId);
-      }
-
-      return {
-        return_code: callbackData.type,
-        return_message: callbackData.type === 1 ? 'success' : 'failed'
-      };
-
-    } catch (error) {
-      console.error('Callback error:', error);
-      return {
-        return_code: -3,
-        return_message: 'internal server error'
-      };
-    }
-  }
-
-  // Kiểm tra trạng thái thanh toán
-  @Get('check-status/:bookingId')
-  @UseGuards(JwtAuthGuard) 
-  async checkPaymentStatus(
-    @Param('bookingId') bookingId: string,
-    @Req() req: AuthenticatedRequest
-  ) {
-    try {
-      const booking = await this.prisma.booking.findUnique({
-        where: { booking_id: Number(bookingId) }
+      console.log('Parsed data:', {
+        data,
+        embedData,
+        bookingId
       });
 
-      if (!booking || booking.user_id !== req.user.user_id) {
-        throw new UnauthorizedException();
+      if (callbackData.type === 1) {
+        console.log('Processing successful payment...');
+        await this.paymentService.handlePaymentSuccess(bookingId);
+        return {
+          return_code: 1,
+          return_message: 'success'
+        };
+      } else {
+        console.log('Processing failed payment...');
+        await this.paymentService.handlePaymentFailure(bookingId);
+        return {
+          return_code: 0,
+          return_message: 'failed'
+        };
       }
-
-      const status = await this.paymentService.checkPaymentStatus(bookingId);
-      return status;
-
     } catch (error) {
-      throw new HttpException(
-        'Không thể kiểm tra trạng thái thanh toán',
-        HttpStatus.INTERNAL_SERVER_ERROR
-      );
+      console.error('Callback processing error:', error);
+      return {
+        return_code: -1,
+        return_message: error.message
+      };
     }
   }
+
+  
 } 

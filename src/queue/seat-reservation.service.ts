@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { DatabaseService } from '../database/database.service';
+import { DatabaseService } from 'src/database/database.service';
 import { RedisService } from '../redis/redis.service';
 import { ConfirmBookingDto } from '../booking/dto/confirm-booking.dto';
 
@@ -305,7 +305,7 @@ export class SeatReservationService {
           acc[seat.row] = [];
         }
 
-        // Lấy tr��ng thái ghế từ showtimeseat
+        // Lấy trạng thái ghế từ showtimeseat
         const showtimeSeat = seat.showtimeseat[0]; // Chỉ có 1 bản ghi do where showtime_id
         const seatStatus = showtimeSeat?.status || 'available';
 
@@ -431,7 +431,7 @@ export class SeatReservationService {
       });
 
       if (!pendingBooking) {
-        throw new BadRequestException('Ghế đang được chọn');
+        throw new BadRequestException('Không tìm thấy đơn đặt chỗ đang chờ');
       }
 
       // Kiểm tra xem ghế có thuộc booking này không
@@ -443,7 +443,7 @@ export class SeatReservationService {
         throw new BadRequestException('Ghế không thuộc đơn đặt chỗ của bạn');
       }
 
-      // Kiểm tra trạng thái ghế trong suất chiếu
+      // Kiểm tra trạng thái ghế trong showtimeseat
       const showtimeSeat = await this.prisma.showtimeseat.findFirst({
         where: {
           showtime_id: showtimeId,
@@ -460,7 +460,10 @@ export class SeatReservationService {
         // Cập nhật trạng thái ghế về available trong showtimeseat
         await prisma.showtimeseat.update({
           where: {
-            id: showtimeSeat.id
+            showtime_id_seat_id: {
+              showtime_id: showtimeId,
+              seat_id: seatId
+            }
           },
           data: {
             status: 'available'
@@ -510,10 +513,7 @@ export class SeatReservationService {
       // Lấy danh sách ghế còn lại
       const remainingSeats = await this.prisma.bookingdetail.findMany({
         where: {
-          booking_id: pendingBooking.booking_id,
-          NOT: {
-            seat_id: seatId
-          }
+          booking_id: pendingBooking.booking_id
         },
         include: {
           seat: true
@@ -617,6 +617,19 @@ export class SeatReservationService {
       throw new NotFoundException('Không tìm thấy suất chiếu');
     }
 
+    // Tìm booking pending của user
+    const pendingBooking = await this.prisma.booking.findFirst({
+      where: {
+        user_id: userId,
+        showtime_id: showtimeId,
+        booking_status: 'pending',
+      },
+    });
+
+    if (!pendingBooking) {
+      throw new BadRequestException('Không tìm thấy booking đang chờ');
+    }
+
     // Kiểm tra ghế
     const seats = await this.prisma.seat.findMany({
       where: {
@@ -657,28 +670,26 @@ export class SeatReservationService {
       status: 'success',
       data: {
         confirmation: {
-          showtime: {
-            id: showtime.showtime_id,
-            showDate: showtime.show_date,
-            startTime: showtime.start_time,
-            endTime: showtime.end_time,
-          },
-          movie: {
-            id: showtime.movie.movie_id,
-            title: showtime.movie.title,
-            posterUrl: showtime.movie.poster_url,
-          },
-          room: {
-            id: showtime.room.room_id,
-            name: showtime.room.name,
-          },
+          id: pendingBooking.booking_id,
           customer: {
             name: user.full_name || '',
             email: user.email,
           },
+          movie: {
+            title: showtime.movie.title,
+            posterUrl: showtime.movie.poster_url,
+          },
+          showtime: {
+            id: showtime.showtime_id,
+            showDate: showtime.show_date,
+            startTime: showtime.start_time.toString().slice(0, 5),
+          },
+          room: {
+            name: showtime.room.name,
+          },
           seats: formattedSeats,
-          totalAmount,
           basePrice: showtime.base_price,
+          totalAmount,
         },
       },
     };

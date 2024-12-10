@@ -88,7 +88,7 @@ export class ZaloPayService {
       const appTransId = `${moment().format('YYMMDD')}_${transID}`;
 
       const embed_data = {
-        redirecturl: process.env.FRONTEND_URL,
+        redirecturl: `${process.env.FRONTEND_PAYMENT_RESULT_URL}?bookingId=${bookingId}`,
         bookingId: bookingId
       };
 
@@ -176,14 +176,24 @@ export class ZaloPayService {
 
   async handlePaymentSuccess(bookingId: number) {
     const payment = await this.prisma.payment.findFirst({
-      where: { booking_id: bookingId }
+      where: { booking_id: bookingId },
+      include: {
+        booking: {
+          include: {
+            bookingdetail: true
+          }
+        }
+      }
     });
 
     await this.prisma.$transaction([
+      // Cập nhật payment
       this.prisma.payment.update({
         where: { payment_id: payment.payment_id },
         data: { status: PaymentStatus.COMPLETED }
       }),
+
+      // Cập nhật booking
       this.prisma.booking.update({
         where: { booking_id: bookingId },
         data: {
@@ -191,12 +201,13 @@ export class ZaloPayService {
           payment_status: PaymentStatus.COMPLETED
         }
       }),
-      this.prisma.seat.updateMany({
+
+      // Cập nhật trạng thái ghế trong showtimeseat
+      this.prisma.showtimeseat.updateMany({
         where: {
-          bookingdetail: {
-            some: {
-              booking_id: bookingId
-            }
+          showtime_id: payment.booking.showtime_id,
+          seat_id: {
+            in: payment.booking.bookingdetail.map(d => d.seat_id)
           }
         },
         data: {
@@ -208,19 +219,42 @@ export class ZaloPayService {
 
   async handlePaymentFailure(bookingId: number) {
     const payment = await this.prisma.payment.findFirst({
-      where: { booking_id: bookingId }
+      where: { booking_id: bookingId },
+      include: {
+        booking: {
+          include: {
+            bookingdetail: true
+          }
+        }
+      }
     });
 
     await this.prisma.$transaction([
+      // Cập nhật payment
       this.prisma.payment.update({
         where: { payment_id: payment.payment_id },
         data: { status: PaymentStatus.FAILED }
       }),
+
+      // Cập nhật booking
       this.prisma.booking.update({
         where: { booking_id: bookingId },
         data: {
           booking_status: BookingStatus.CANCELLED,
           payment_status: PaymentStatus.FAILED
+        }
+      }),
+
+      // Cập nhật trạng thái ghế về available trong showtimeseat
+      this.prisma.showtimeseat.updateMany({
+        where: {
+          showtime_id: payment.booking.showtime_id,
+          seat_id: {
+            in: payment.booking.bookingdetail.map(d => d.seat_id)
+          }
+        },
+        data: {
+          status: 'available'
         }
       })
     ]);

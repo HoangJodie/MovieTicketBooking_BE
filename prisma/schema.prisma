@@ -38,6 +38,7 @@ model bookingdetail {
   @@index([booking_id], map: "booking_id")
   @@index([ticket_code], map: "idx_ticket_code")
   @@index([seat_id], map: "seat_id")
+  @@unique([booking_id, seat_id])
 }
 
 model genre {
