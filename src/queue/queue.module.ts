@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
 import { SeatReservationProcessor } from './seat-reservation.processor';
 import { SeatReservationService } from './seat-reservation.service';
-import { DatabaseModule } from '../auth/database/database.module';
+import { DatabaseModule } from '../database/database.module';
 import { RedisModule } from '../redis/redis.module';
 
 @Module({

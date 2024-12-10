@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { DatabaseService } from '../auth/database/database.service';
+import { DatabaseService } from '../database/database.service';
 import { RedisService } from '../redis/redis.service';
 import { ConfirmBookingDto } from '../booking/dto/confirm-booking.dto';
 
@@ -17,16 +17,18 @@ export class SeatReservationService {
 
   async initiateBooking(userId: number, showtimeId: number, seatIds: number[]) {
     try {
-      // Kiểm tra xem ghế có available không
-      const seats = await this.prisma.seat.findMany({
+      // Kiểm tra trạng thái ghế trong suất chiếu
+      const showtimeSeats = await this.prisma.showtimeseat.findMany({
         where: {
+          showtime_id: showtimeId,
           seat_id: { in: seatIds },
         },
       });
 
-      const unavailableSeats = seats.filter(seat => seat.status !== 'available');
+      // Kiểm tra ghế không available
+      const unavailableSeats = showtimeSeats.filter(seat => seat.status !== 'available');
       if (unavailableSeats.length > 0) {
-        throw new BadRequestException('Một số ghế đã đư���c đặt, vui lòng chọn ghế khác');
+        throw new BadRequestException('Một số ghế đã được đặt, vui lòng chọn ghế khác');
       }
 
       // Hủy booking pending cũ của user nếu có
@@ -50,41 +52,55 @@ export class SeatReservationService {
           }
         }
 
-        // Xóa booking details trước
-        await this.prisma.bookingdetail.deleteMany({
-          where: {
-            booking_id: oldPendingBooking.booking_id
-          }
-        });
-
-        // Sau đó mới xóa booking
-        await this.prisma.booking.delete({
-          where: { booking_id: oldPendingBooking.booking_id }
-        });
+        // Xóa booking details và booking trong transaction
+        await this.prisma.$transaction([
+          this.prisma.bookingdetail.deleteMany({
+            where: { booking_id: oldPendingBooking.booking_id }
+          }),
+          this.prisma.booking.delete({
+            where: { booking_id: oldPendingBooking.booking_id }
+          }),
+          // Cập nhật lại trạng thái ghế cũ về available
+          this.prisma.showtimeseat.updateMany({
+            where: {
+              showtime_id: showtimeId,
+              seat_id: { 
+                in: oldPendingBooking.bookingdetail.map(d => d.seat_id) 
+              }
+            },
+            data: { status: 'available' }
+          })
+        ]);
       }
 
-      // Tạo booking mới với trạng thái pending
-      const booking = await this.prisma.booking.create({
-        data: {
-          user_id: userId,
-          showtime_id: showtimeId,
-          booking_status: 'pending',
-          bookingdetail: {
-            create: seatIds.map(seatId => ({
-              seat_id: seatId
-            }))
+      // Tạo booking mới và cập nhật trạng thái ghế trong transaction
+      const booking = await this.prisma.$transaction(async (prisma) => {
+        // Tạo booking mới
+        const newBooking = await prisma.booking.create({
+          data: {
+            user_id: userId,
+            showtime_id: showtimeId,
+            booking_status: 'pending',
+            bookingdetail: {
+              create: seatIds.map(seatId => ({
+                seat_id: seatId
+              }))
+            }
           }
-        }
-      });
+        });
 
-      // Cập nhật trạng thái ghế thành pending
-      await this.prisma.seat.updateMany({
-        where: {
-          seat_id: { in: seatIds }
-        },
-        data: {
-          status: 'pending'
-        }
+        // Cập nhật trạng thái ghế trong showtimeseat
+        await prisma.showtimeseat.updateMany({
+          where: {
+            showtime_id: showtimeId,
+            seat_id: { in: seatIds }
+          },
+          data: {
+            status: 'pending'
+          }
+        });
+
+        return newBooking;
       });
 
       // Lưu thông tin quyền sở hữu ghế vào Redis
@@ -269,9 +285,14 @@ export class SeatReservationService {
         }
       }) : null;
 
-      // Lấy tất cả các ghế của phòng
+      // Lấy tất cả các ghế của phòng và trạng thái của chúng trong suất chiếu này
       const seats = await this.prisma.seat.findMany({
         where: { room_id: showtime.room_id },
+        include: {
+          showtimeseat: {
+            where: { showtime_id: showtimeId }
+          }
+        },
         orderBy: [
           { row: 'asc' },
           { seat_number: 'asc' },
@@ -284,22 +305,22 @@ export class SeatReservationService {
           acc[seat.row] = [];
         }
 
+        // Lấy tr��ng thái ghế từ showtimeseat
+        const showtimeSeat = seat.showtimeseat[0]; // Chỉ có 1 bản ghi do where showtime_id
+        const seatStatus = showtimeSeat?.status || 'available';
+
         // Kiểm tra xem ghế có thuộc booking pending của user không
         const isUserPendingSeat = userPendingBooking?.bookingdetail?.some(
           detail => detail.seat_id === seat.seat_id
         );
-
-        // Nếu là ghế của user đang pending -> available để có thể chọn lại
-        // Nếu không -> giữ nguyên status
-        const seatStatus = isUserPendingSeat ? 'available' : seat.status;
 
         acc[seat.row].push({
           id: seat.seat_id,
           seatNumber: seat.seat_number,
           type: seat.seat_type,
           price: seat.price,
-          status: seatStatus,
-          isSelected: isUserPendingSeat // Thêm flag để frontend biết ghế đã được chọn trước đó
+          status: isUserPendingSeat ? 'available' : seatStatus,
+          isSelected: isUserPendingSeat
         });
         return acc;
       }, {});
@@ -405,11 +426,7 @@ export class SeatReservationService {
           booking_status: 'pending',
         },
         include: {
-          bookingdetail: {
-            include: {
-              seat: true
-            }
-          }
+          bookingdetail: true
         }
       });
 
@@ -426,17 +443,24 @@ export class SeatReservationService {
         throw new BadRequestException('Ghế không thuộc đơn đặt chỗ của bạn');
       }
 
-      // Kiểm tra trạng thái ghế
-      if (bookingDetail.seat.status !== 'pending') {
+      // Kiểm tra trạng thái ghế trong suất chiếu
+      const showtimeSeat = await this.prisma.showtimeseat.findFirst({
+        where: {
+          showtime_id: showtimeId,
+          seat_id: seatId
+        }
+      });
+
+      if (!showtimeSeat || showtimeSeat.status !== 'pending') {
         throw new BadRequestException('Ghế không thể hủy vì đã thay đổi trạng thái');
       }
 
       // Bắt đầu transaction
       await this.prisma.$transaction(async (prisma) => {
-        // Cập nhật trạng thái ghế về available
-        await prisma.seat.update({
+        // Cập nhật trạng thái ghế về available trong showtimeseat
+        await prisma.showtimeseat.update({
           where: {
-            seat_id: seatId,
+            id: showtimeSeat.id
           },
           data: {
             status: 'available'
@@ -483,18 +507,29 @@ export class SeatReservationService {
         }
       });
 
+      // Lấy danh sách ghế còn lại
+      const remainingSeats = await this.prisma.bookingdetail.findMany({
+        where: {
+          booking_id: pendingBooking.booking_id,
+          NOT: {
+            seat_id: seatId
+          }
+        },
+        include: {
+          seat: true
+        }
+      });
+
       return {
         status: 'success',
         message: 'Đã hủy ghế thành công',
         data: {
-          remainingSeats: pendingBooking.bookingdetail
-            .filter(detail => detail.seat_id !== seatId)
-            .map(detail => ({
-              id: detail.seat_id,
-              seatNumber: detail.seat.seat_number,
-              row: detail.seat.row,
-              price: detail.seat.price
-            }))
+          remainingSeats: remainingSeats.map(detail => ({
+            id: detail.seat_id,
+            seatNumber: detail.seat.seat_number,
+            row: detail.seat.row,
+            price: detail.seat.price
+          }))
         }
       };
     } catch (error) {

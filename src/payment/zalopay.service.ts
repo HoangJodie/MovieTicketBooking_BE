@@ -1,4 +1,4 @@
-import { DatabaseService } from "../auth/database/database.service";
+import { DatabaseService } from "../database/database.service";
 import { PaymentStatus, BookingStatus } from "../constants/constants";
 import { Injectable } from '@nestjs/common';
 import axios from 'axios';

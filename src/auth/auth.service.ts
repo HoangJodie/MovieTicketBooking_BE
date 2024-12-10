@@ -1,7 +1,7 @@
 /* eslint-disable prettier/prettier */
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { DatabaseService } from './database/database.service';
+import { DatabaseService } from '../database/database.service';
 import * as bcrypt from 'bcryptjs';
 import { AuthModule } from './auth.module';
 import { RedisService } from '../redis/redis.service';

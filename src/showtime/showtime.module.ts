@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ShowtimeController } from './showtime.controller';
 import { ShowtimeService } from './showtime.service';
-import { DatabaseModule } from '../auth/database/database.module';
+import { DatabaseModule } from '../database/database.module';
 
 @Module({
   imports: [DatabaseModule],

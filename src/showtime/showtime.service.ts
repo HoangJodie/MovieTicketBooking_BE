@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { DatabaseService } from '../auth/database/database.service';
+import { DatabaseService } from '../database/database.service';
 import { CreateShowtimeDto } from './dto/create-showtime.dto';
 
 @Injectable()
@@ -17,9 +17,12 @@ export class ShowtimeService {
         throw new BadRequestException('Phim không tồn tại');
       }
 
-      // Kiểm tra phòng tồn tại
+      // Kiểm tra phòng tồn tại và lấy danh sách ghế
       const room = await this.prisma.room.findUnique({
         where: { room_id: createShowtimeDto.room_id },
+        include: {
+          seat: true // Lấy thêm thông tin các ghế trong phòng
+        }
       });
 
       if (!room) {
@@ -28,13 +31,11 @@ export class ShowtimeService {
 
       // Chuyển đổi thời gian
       const showDate = new Date(createShowtimeDto.show_date);
-      showDate.setHours(0, 0, 0, 0); // Reset giờ về 00:00:00
+      showDate.setHours(0, 0, 0, 0);
 
-      // Parse thời gian từ input
       const [startHour, startMinute] = createShowtimeDto.start_time.split(':');
       const [endHour, endMinute] = createShowtimeDto.end_time.split(':');
 
-      // Tạo đối tượng Date cho start_time và end_time
       const startTime = new Date(showDate);
       startTime.setUTCHours(parseInt(startHour), parseInt(startMinute));
 
@@ -69,22 +70,36 @@ export class ShowtimeService {
         );
       }
 
-      // Tạo lịch chiếu mới
-      const showtime = await this.prisma.showtime.create({
-        data: {
-          movie_id: createShowtimeDto.movie_id,
-          room_id: createShowtimeDto.room_id,
-          show_date: showDate,
-          start_time: startTime,
-          end_time: endTime,
-          base_price: createShowtimeDto.base_price,
-          available_seats: room.capacity,
-          status: 'active',
-        },
-        include: {
-          movie: true,
-          room: true,
-        },
+      // Tạo suất chiếu mới trong transaction
+      const showtime = await this.prisma.$transaction(async (prisma) => {
+        // 1. Tạo suất chiếu
+        const newShowtime = await prisma.showtime.create({
+          data: {
+            movie_id: createShowtimeDto.movie_id,
+            room_id: createShowtimeDto.room_id,
+            show_date: showDate,
+            start_time: startTime,
+            end_time: endTime,
+            base_price: createShowtimeDto.base_price,
+            available_seats: room.capacity,
+            status: 'active',
+          },
+          include: {
+            movie: true,
+            room: true,
+          },
+        });
+
+        // 2. Tạo các bản ghi showtimeseat cho tất cả ghế trong phòng
+        await prisma.showtimeseat.createMany({
+          data: room.seat.map(seat => ({
+            showtime_id: newShowtime.showtime_id,
+            seat_id: seat.seat_id,
+            status: 'available'
+          }))
+        });
+
+        return newShowtime;
       });
 
       // Format response
@@ -99,8 +114,8 @@ export class ShowtimeService {
           name: showtime.room.name,
         },
         showDate: showtime.show_date,
-        startTime: createShowtimeDto.start_time,  // Trả về thời gian gốc từ input
-        endTime: createShowtimeDto.end_time,      // Trả về thời gian gốc từ input
+        startTime: createShowtimeDto.start_time,
+        endTime: createShowtimeDto.end_time,
         basePrice: showtime.base_price,
         availableSeats: showtime.available_seats,
       };

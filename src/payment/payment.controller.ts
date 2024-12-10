@@ -11,7 +11,7 @@ import {
   UnauthorizedException
 } from '@nestjs/common';
 import { ZaloPayService } from './zalopay.service';
-import { DatabaseService } from '../auth/database/database.service';
+import { DatabaseService } from '../database/database.service';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 
 // Thêm interface cho Request

@@ -111,23 +111,25 @@ model seat {
   status        String?         @default("active") @db.VarChar(50)
   bookingdetail bookingdetail[]
   room          room            @relation(fields: [room_id], references: [room_id], onDelete: NoAction, onUpdate: NoAction, map: "seat_ibfk_1")
+  showtimeseat  showtimeseat[]
 
   @@index([room_id], map: "room_id")
 }
 
 model showtime {
-  showtime_id     Int       @id @default(autoincrement())
+  showtime_id     Int            @id @default(autoincrement())
   movie_id        Int?
   room_id         Int
-  show_date       DateTime? @db.DateTime(0)
-  start_time      DateTime? @db.Time(0)
-  end_time        DateTime? @db.Time(0)
-  base_price      Decimal?  @db.Decimal(10, 2)
+  show_date       DateTime?      @db.DateTime(0)
+  start_time      DateTime?      @db.Time(0)
+  end_time        DateTime?      @db.Time(0)
+  base_price      Decimal?       @db.Decimal(10, 2)
   available_seats Int?
-  status          String?   @default("active") @db.VarChar(50)
+  status          String?        @default("active") @db.VarChar(50)
   booking         booking[]
-  movie           movie?    @relation(fields: [movie_id], references: [movie_id], onDelete: NoAction, onUpdate: NoAction, map: "showtime_ibfk_1")
-  room            room      @relation(fields: [room_id], references: [room_id], onDelete: NoAction, onUpdate: NoAction, map: "showtime_ibfk_2")
+  movie           movie?         @relation(fields: [movie_id], references: [movie_id], onDelete: NoAction, onUpdate: NoAction, map: "showtime_ibfk_1")
+  room            room           @relation(fields: [room_id], references: [room_id], onDelete: NoAction, onUpdate: NoAction, map: "showtime_ibfk_2")
+  showtimeseat    showtimeseat[]
 
   @@index([show_date], map: "idx_showtime_date")
   @@index([movie_id], map: "movie_id")
@@ -148,4 +150,17 @@ model user {
   booking        booking[]
 
   @@index([email], map: "idx_user_email")
+}
+
+model showtimeseat {
+  id          Int      @id @default(autoincrement())
+  showtime_id Int
+  seat_id     Int
+  status      String   @default("available") @db.VarChar(50)
+  seat        seat     @relation(fields: [seat_id], references: [seat_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_showtimeseat_seat")
+  showtime    showtime @relation(fields: [showtime_id], references: [showtime_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_showtimeseat_showtime")
+
+  @@unique([showtime_id, seat_id], map: "showtime_seat_unique")
+  @@index([seat_id], map: "idx_seat_id")
+  @@index([showtime_id], map: "idx_showtime_id")
 }

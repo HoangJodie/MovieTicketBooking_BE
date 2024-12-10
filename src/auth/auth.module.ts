@@ -7,7 +7,7 @@ import { PassportModule } from '@nestjs/passport';
 import { LocalStrategy } from './strategies/local.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { RolesGuard } from './guards/roles.guards';
-import { DatabaseModule } from './database/database.module';
+import { DatabaseModule } from '../database/database.module';
 import { RedisModule } from '../redis/redis.module';
 
 @Module({

@@ -1,6 +1,6 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Job } from 'bull';
-import { DatabaseService } from '../auth/database/database.service';
+import { DatabaseService } from '../database/database.service';
 
 @Processor('seat-reservation')
 export class SeatReservationProcessor {
@@ -11,9 +11,10 @@ export class SeatReservationProcessor {
     const { seatIds, showtimeId } = job.data;
 
     try {
-      // Cập nhật trạng thái ghế về available
-      await this.prisma.seat.updateMany({
+      // Cập nhật trạng thái ghế về available trong suất chiếu
+      await this.prisma.showtimeseat.updateMany({
         where: {
+          showtime_id: showtimeId,
           seat_id: {
             in: seatIds,
           },
