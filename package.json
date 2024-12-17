@@ -17,7 +17,13 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "start:pm2": "pm2 start dist/main.js --name 'ticketbooking-api'",
+    "start:pm2:dev": "pm2 start dist/main.js --name 'ticketbooking-api' --watch",
+    "start:pm2:prod": "pm2 start dist/main.js --name 'ticketbooking-api'",
+    "pm2:stop": "pm2 stop ticketbooking-api",
+    "pm2:delete": "pm2 delete ticketbooking-api",
+    "pm2:kill": "pm2 kill"
   },
   "dependencies": {
     "@nestjs/bull": "^10.2.3",

@@ -5,6 +5,8 @@ import { JwtAuthGuard } from './guards/jwt.guard';
 import { Request, Response } from 'express';
 import { Roles } from './decorators/roles.decorators';
 import { RolesGuard } from './guards/roles.guards';
+import { RateLimit } from '../redis/rate-limit.decorator';
+import { RateLimitGuard } from '../redis/rate-limit.guard';
 
 
 @Controller('auth')
@@ -16,6 +18,8 @@ export class AuthController {
 
 @Post('login')
 @UseGuards(LocalGuard)
+@UseGuards(RateLimitGuard)
+@RateLimit(5, 60)
 async login(@Req() req: Request) {
   try {
     const user = req.user;
@@ -29,6 +33,8 @@ async login(@Req() req: Request) {
 
   // Endpoint để lấy access token mới từ refresh token
   @Post('refresh')
+  @UseGuards(RateLimitGuard)
+  @RateLimit(10, 300)
   async refreshToken(@Body('refreshToken') refreshToken: string) {
     try {
       const newAccessToken = await this.authService.refreshToken(refreshToken);
@@ -66,5 +72,12 @@ async login(@Req() req: Request) {
   async checkStoredToken(@Param('userId') userId: string) {
     const token = await this.authService.getStoredRefreshToken(userId);
     return { stored_token: token };
+  }
+
+  @Post('register')
+  @UseGuards(RateLimitGuard)
+  @RateLimit(3, 3600)
+  async register(@Req() req: Request) {
+    // Handle registration logic here
   }
 }

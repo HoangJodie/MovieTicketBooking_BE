@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import * as cookieParser from 'cookie-parser';
+import { RateLimitGuard } from './redis/rate-limit.guard';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -13,6 +14,8 @@ async function bootstrap() {
   });
 
   app.use(cookieParser());
+
+  app.useGlobalGuards(app.get(RateLimitGuard));
 
   await app.listen(3000);
 }
