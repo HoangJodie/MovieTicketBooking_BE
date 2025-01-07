@@ -16,19 +16,19 @@ export class AuthController {
   // Đăng nhập và tạo token
   // auth.controller.ts
 
-@Post('login')
-@UseGuards(LocalGuard)
-@UseGuards(RateLimitGuard)
-@RateLimit(5, 60)
-async login(@Req() req: Request) {
-  try {
-    const user = req.user;
-    const tokens = await this.authService.generateTokens(user);
-    return tokens; // Trả về cả access token và refresh token
-  } catch (error) {
-    throw new UnauthorizedException('Login failed');
+  @Post('login')
+  @UseGuards(LocalGuard)
+  @UseGuards(RateLimitGuard)
+  @RateLimit(5, 60)
+  async login(@Req() req: Request) {
+    try {
+      const user = req.user;
+      const tokens = await this.authService.generateTokens(user);
+      return tokens; // Trả về cả access token và refresh token
+    } catch (error) {
+      throw new UnauthorizedException('Login failed');
+    }
   }
-}
 
 
   // Endpoint để lấy access token mới từ refresh token
@@ -58,13 +58,6 @@ async login(@Req() req: Request) {
     return { message: 'Logged out successfully' };
   }
 
-  // Chỉ admin có thể truy cập trang dashboard
-  @Get('dashboard')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('1') // Chỉ những người có role_id '1' mới truy cập được
-  getAdminDashboard(@Req() req: Request) {
-    return `Welcome to admin dashboard`; // Trả về thông điệp chào mừng
-  }
 
   @Get('check-token/:userId')
   @UseGuards(JwtAuthGuard, RolesGuard)

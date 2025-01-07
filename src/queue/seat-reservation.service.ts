@@ -4,6 +4,13 @@ import { Queue } from 'bull';
 import { DatabaseService } from 'src/database/database.service';
 import { RedisService } from '../redis/redis.service';
 import { ConfirmBookingDto } from '../booking/dto/confirm-booking.dto';
+import { AuthService } from '../auth/auth.service';
+
+enum BookingStatus {
+  PENDING = 'pending',
+  CONFIRMED = 'confirmed',
+  CANCELLED = 'cancelled'
+}
 
 @Injectable()
 export class SeatReservationService {
@@ -14,143 +21,51 @@ export class SeatReservationService {
     @InjectQueue('seat-reservation') private reservationQueue: Queue,
     private readonly prisma: DatabaseService,
     private readonly redis: RedisService,
+    private readonly authService: AuthService,
   ) {}
 
-  async initiateBooking(userId: number, showtimeId: number, seatIds: number[]) {
-    try {
-      // Kiểm tra trạng thái ghế trong suất chiếu
-      const showtimeSeats = await this.prisma.showtimeseat.findMany({
-        where: {
-          showtime_id: showtimeId,
-          seat_id: { in: seatIds },
-        },
-      });
+  async initiateBooking(userId: string, showtimeId: number, seatIds: number[]) {
+    const user = await this.authService.getCurrentUser(userId);
+    
+    // Kiểm tra showtime tồn tại
+    const showtime = await this.prisma.showtime.findUnique({
+      where: { showtime_id: showtimeId }
+    });
 
-      // Kiểm tra ghế không available
-      const unavailableSeats = showtimeSeats.filter(seat => seat.status !== 'available');
-      if (unavailableSeats.length > 0) {
-        throw new BadRequestException('Một số ghế đã được đặt, vui lòng chọn ghế khác');
-      }
-
-      // Hủy booking pending cũ của user nếu có
-      const oldPendingBooking = await this.prisma.booking.findFirst({
-        where: {
-          user_id: userId,
-          showtime_id: showtimeId,
-          booking_status: 'pending',
-        },
-        include: {
-          bookingdetail: true
-        }
-      });
-
-      if (oldPendingBooking) {
-        // Xóa job release cũ
-        const jobs = await this.reservationQueue.getJobs(['delayed']);
-        for (const job of jobs) {
-          if (job.data.bookingId === oldPendingBooking.booking_id) {
-            await job.remove();
-          }
-        }
-
-        // Xóa booking details và booking trong transaction
-        await this.prisma.$transaction([
-          this.prisma.bookingdetail.deleteMany({
-            where: { booking_id: oldPendingBooking.booking_id }
-          }),
-          this.prisma.booking.delete({
-            where: { booking_id: oldPendingBooking.booking_id }
-          }),
-          // Cập nhật lại trạng thái ghế cũ về available
-          this.prisma.showtimeseat.updateMany({
-            where: {
-              showtime_id: showtimeId,
-              seat_id: { 
-                in: oldPendingBooking.bookingdetail.map(d => d.seat_id) 
-              }
-            },
-            data: { status: 'available' }
-          })
-        ]);
-      }
-
-      // Tạo booking mới và cập nhật trạng thái ghế trong transaction
-      const booking = await this.prisma.$transaction(async (prisma) => {
-        // Tạo booking mới
-        const newBooking = await prisma.booking.create({
-          data: {
-            user_id: userId,
-            showtime_id: showtimeId,
-            booking_status: 'pending',
-            bookingdetail: {
-              create: seatIds.map(seatId => ({
-                seat_id: seatId
-              }))
-            }
-          }
-        });
-
-        // Cập nhật trạng thái ghế trong showtimeseat
-        await prisma.showtimeseat.updateMany({
-          where: {
-            showtime_id: showtimeId,
-            seat_id: { in: seatIds }
-          },
-          data: {
-            status: 'pending'
-          }
-        });
-
-        return newBooking;
-      });
-
-      // Lưu thông tin quyền sở hữu ghế vào Redis
-      for (const seatId of seatIds) {
-        const key = `seat:${showtimeId}:${seatId}`;
-        await this.redis.set(key, userId.toString(), 60); // Sửa lại thành 600 giây (10 phút)
-      }
-
-      // Thêm job release ghế vào queue với logging
-      const job = await this.reservationQueue.add(
-        'release-seats',
-        {
-          bookingId: booking.booking_id,
-          seatIds,
-          showtimeId,
-        },
-        {
-          delay: 6 * 10000, // 6 giây
-        }
-      );
-
-      this.logger.log(`Created release job ${job.id} for booking ${booking.booking_id}`);
-      this.logger.log(`Seats will be released in 6 seconds at ${new Date(Date.now() + 6 * 1000)}`);
-
-      // Thêm listener để log quá trình đếm ngược mỗi giây
-      const remainingTime = setInterval(async () => {
-        const currentJob = await this.reservationQueue.getJob(job.id);
-        if (currentJob) {
-          const timeLeft = Math.ceil((currentJob.opts.delay - (Date.now() - currentJob.timestamp)) / 1000);
-          if (timeLeft > 0) {
-            this.logger.log(`⏰ Time remaining for booking ${booking.booking_id}: ${timeLeft} seconds`);
-          } else {
-            this.logger.log(`⚠️ Time's up for booking ${booking.booking_id}! Processing release...`);
-            clearInterval(remainingTime);
-          }
-        } else {
-          this.logger.log(`🔄 Job completed for booking ${booking.booking_id}`);
-          clearInterval(remainingTime);
-        }
-      }, 1000); // Log mỗi giây
-
-      return {
-        message: 'Đặt ghế thành công, vui lòng thanh toán trong vòng 6 giây',
-        reservedSeats: seatIds,
-        bookingId: booking.booking_id
-      };
-    } catch (error) {
-      throw new BadRequestException(error.message);
+    if (!showtime) {
+      throw new NotFoundException('Suất chiếu không tồn tại');
     }
+
+    // Tính tổng tiền từ giá ghế
+    const seats = await this.prisma.seat.findMany({
+      where: {
+        seat_id: { in: seatIds }
+      }
+    });
+
+    const totalAmount = seats.reduce((sum, seat) => sum + Number(seat.price), 0);
+    
+    // Tạo booking
+    const booking = await this.prisma.booking.create({
+      data: {
+        user_id: user.user_id,
+        booking_status: BookingStatus.PENDING,
+        showtime_id: showtimeId,
+        total_amount: totalAmount,
+        payment_status: 'pending'
+      }
+    });
+
+    // Tạo booking details
+    await this.prisma.bookingdetail.createMany({
+      data: seats.map(seat => ({
+        booking_id: booking.booking_id,
+        seat_id: seat.seat_id,
+        price: seat.price
+      }))
+    });
+
+    return booking;
   }
 
   async updateSelectedSeats(userId: number, showtimeId: number, newSeatIds: number[]) {
@@ -412,7 +327,7 @@ export class SeatReservationService {
       // Lấy danh sách seat_ids
       const seatIds = pendingBooking.bookingdetail.map(detail => detail.seat_id);
 
-      // Cập nh���t trạng thái ghế về available
+      // Cập nhật trạng thái ghế về available
       await this.prisma.seat.updateMany({
         where: {
           seat_id: {
@@ -505,7 +420,7 @@ export class SeatReservationService {
           }
         });
 
-        // Xóa th��ng tin quyền sở hữu ghế khỏi Redis
+        // Xóa thông tin quyền sở hữu ghế khỏi Redis
         const key = `seat:${showtimeId}:${seatId}`;
         await this.redis.del(key);
 
@@ -649,7 +564,7 @@ export class SeatReservationService {
     });
 
     if (!showtime) {
-      throw new NotFoundException('Không tìm thấy suất chi���u');
+      throw new NotFoundException('Không tìm thấy suất chiếu');
     }
 
     // Tìm booking pending của user

@@ -28,9 +28,9 @@ import { RedisModule } from '../redis/redis.module';
 })
 export class AuthModule {
   // Thời gian hết hạn của access token
-  static readonly accessTokenExpiration = '10m'; // Thay đổi theo nhu cầu
+  static readonly accessTokenExpiration = '10m'; 
   // Thời gian hết hạn của refresh token
-  static readonly refreshTokenExpiration = '7d'; // Thay đổi theo nhu cầu
+  static readonly refreshTokenExpiration = '7d'; 
 
   // Cung cấp thời gian cho access token
   static getAccessTokenExpiration() {

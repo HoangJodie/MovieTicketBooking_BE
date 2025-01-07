@@ -1,5 +1,5 @@
 /* eslint-disable prettier/prettier */
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { DatabaseService } from '../database/database.service';
 import * as bcrypt from 'bcryptjs';
@@ -125,5 +125,17 @@ export class AuthService {
   async getStoredRefreshToken(userId: string) {
     const token = await this.redisService.get(`refresh_token:${userId}`);
     return token;
+  }
+
+  async getCurrentUser(userId: string) {
+    const user = await this.databaseService.user.findUnique({
+      where: { user_id: parseInt(userId) }
+    });
+    
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    
+    return user;
   }
 }

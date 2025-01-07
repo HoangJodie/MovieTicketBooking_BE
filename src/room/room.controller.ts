@@ -31,7 +31,6 @@ export class RoomController {
       const rooms = await this.roomService.findAll();
       console.log('Rooms from database:', rooms);
 
-      // Kiểm tra mảng rỗng thay vì null
       if (!rooms || rooms.length === 0) {
         throw new HttpException(
           {
@@ -51,7 +50,6 @@ export class RoomController {
     } catch (error) {
       console.error('Error in getAllRooms:', error);
       
-      // Log chi tiết lỗi
       if (error instanceof HttpException) {
         throw error;
       }

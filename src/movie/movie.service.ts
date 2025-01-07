@@ -126,7 +126,6 @@ export class MovieService {
 
   async create(movieData: any, poster?: Express.Multer.File) {
     try {
-      // Kiểm tra dữ liệu đầu vào
       if (
         !movieData.title ||
         !movieData.duration ||
@@ -138,7 +137,6 @@ export class MovieService {
         );
       }
 
-      // Chuyển genreIds từ string sang array
       let genreIds;
       try {
         genreIds = typeof movieData.genreIds === 'string' 
@@ -206,7 +204,6 @@ export class MovieService {
 
   async update(id: number, movieData: any) {
     try {
-      // Xóa các genre cũ
       await this.prisma.moviegenre.deleteMany({
         where: { movie_id: id },
       });

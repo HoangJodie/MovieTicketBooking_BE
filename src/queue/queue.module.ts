@@ -4,6 +4,7 @@ import { SeatReservationProcessor } from './seat-reservation.processor';
 import { SeatReservationService } from './seat-reservation.service';
 import { DatabaseModule } from '../database/database.module';
 import { RedisModule } from '../redis/redis.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { RedisModule } from '../redis/redis.module';
     }),
     DatabaseModule,
     RedisModule,
+    AuthModule,
   ],
   providers: [SeatReservationProcessor, SeatReservationService],
   exports: [SeatReservationService],
